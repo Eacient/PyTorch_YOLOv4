@@ -31,11 +31,17 @@ keep img in memory in dict format
 ### augmentation and hyp
 
 1. normal load-img
+
     load_img()
+
 2. augment image space
+
     random_perspective()
+
 3. augment color space
+
     augment_hsv()
+
 4. apply cutouts (not used)
 5. flip up-down
 6. flip left-right
@@ -45,8 +51,10 @@ keep img in memory in dict format
 is default augmentation when not rect
 
 1. mosaic load
+
     a. 4 mosaic load
     b. random_perspective()
+
 3. mix-up load
 4. augment color space
 5. apply cutouts (not used)
