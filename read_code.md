@@ -52,8 +52,8 @@ is default augmentation when not rect
 
 1. mosaic load
 
-    a. 4 mosaic load
-    b. random_perspective()
+    1. 4 mosaic load
+    2. random_perspective()
 
 3. mix-up load
 4. augment color space
