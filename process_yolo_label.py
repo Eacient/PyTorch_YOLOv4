@@ -1,6 +1,9 @@
 from utils.datasets import LoadImagesAndLabels
 import json
 import os
+import glob
+import xmltodict
+import random
 
 # coco的json编码格式，整个数据集共用一个文件
 # 需要预处理images列表，找到id 到file_name的映射
@@ -63,7 +66,92 @@ def process_coco(json_file, img_dir):
 # process_coco('dataset/coco/annotations/instances_val2017.json', 'dataset/coco/val2017')
 # process_coco('dataset/coco/annotations/instances_train2017.json', 'dataset/coco/train2017')
 
-LoadImagesAndLabels('dataset/coco/train2017',
+# LoadImagesAndLabels('dataset/coco/train2017',
+#                     img_size=640,
+#                     batch_size=16,
+#                     augment=False, # mosaic and other augment
+#                     hyp=None, #
+#                     rect=False,
+#                     image_weights=False,
+#                     cache_images=False,
+#                     single_cls=False,
+#                     stride=32,
+#                     pad=0)
+
+# neu
+
+def parse_neu(xml_dir, img_dir):
+    xml_files = glob.glob(xml_dir+'/*.xml')
+    cate_id_map = {}
+    cate_count = 0
+    for xml_file in xml_files:
+        with open(xml_file, 'r+') as f:
+            xml = f.read(-1)
+        d = xmltodict.parse(xml)['annotation']
+        i_w, i_h = int(d['size']['width']), int(d['size']['height'])
+        obj_list = d.get('object')
+        if not isinstance(obj_list, list):
+            obj_list = [obj_list,]
+        objs = []
+        for obj in obj_list:
+            cate_id = cate_id_map.get(obj['name'])
+            if cate_id is None:
+                cate_id = cate_count
+                cate_count += 1
+            cate_id_map[obj['name']] = cate_id
+            # print(obj['name'], cate_id)
+            xmin, ymin, xmax, ymax = int(obj['bndbox']['xmin']), int(obj['bndbox']['ymin']), int(obj['bndbox']['xmax']), int(obj['bndbox']['ymax'])
+            w, h = xmax-xmin, ymax-ymin
+            x_c, y_c = xmin+w/2, ymin+h/2
+            objs.append([cate_id, x_c/i_w, y_c/i_h, w/i_w, h/i_h])
+        label_path = os.path.join(img_dir, xml_file.split('/')[-1].split('.')[0]+'.txt')
+        with open(label_path, 'w+') as f:
+            for obj in objs:
+                f.write('{} {} {} {} {}\n'.format(*obj))
+    print(cate_id_map)
+
+# parse_neu('dataset/neu/ANNOTATIONS', 'dataset/neu/IMAGES')
+
+def split_neu(img_dir):
+    p1 = os.path.join(img_dir, 'train.txt')
+    p2 = os.path.join(img_dir, 'val.txt')
+    p3 = os.path.join(img_dir, 'test.txt')
+
+    cate_img_map = {}
+
+    img_paths = glob.glob(img_dir+'/*.jpg')
+    img_names = [p.split('/')[-1] for p in img_paths]
+
+    for img_name in img_names:
+        cate = '_'.join(img_name.split('_')[:-1])
+        if cate_img_map.get(cate):
+            cate_img_map[cate].append(img_name)
+        else:
+            cate_img_map[cate] = [img_name]
+    
+    train_list = []
+    val_list = []
+    test_list = []
+
+    for cate, names in cate_img_map.items():
+        # split 0.7 0.1 0.2
+        for name in names:
+            p = random.random()
+            if p < 0.7:
+                train_list.append(name)
+            elif p < 0.8:
+                val_list.append(name)
+            else:
+                test_list.append(name)
+
+    for p, list in zip([p1, p2, p3], [train_list, val_list, test_list]):
+        with open(p, 'w+') as f:
+            for name in list:
+                f.write('./'+name+'\n')
+
+# split_neu('dataset/neu/IMAGES')
+
+LoadImagesAndLabels('dataset/neu/IMAGES/test.txt',
                     img_size=640,
                     batch_size=16,
                     augment=False, # mosaic and other augment
@@ -74,5 +162,3 @@ LoadImagesAndLabels('dataset/coco/train2017',
                     single_cls=False,
                     stride=32,
                     pad=0)
-
-# neu
