@@ -105,7 +105,25 @@ augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 ### tb_writer
 
 ```python
+tb_writer = SummaryWriter(log_dir=increment_dir('runs/exp', opt.name))
 log_dir = tb_writer.log_dir if tb_writer else 'runs/evolution'  # run directory
+# class frequency
+if tb_writer:
+    tb_writer.add_histogram('classes', c, 0)
+# Plot
+if ni < 3:
+    f = str(Path(log_dir) / ('train_batch%g.jpg' % ni))  # filename
+    result = plot_images(images=imgs, targets=targets, paths=paths, fname=f)
+    if tb_writer and result is not None:
+        tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)
+        # tb_writer.add_graph(model, imgs)  # add model to tensorboard
+# metrics
+if tb_writer:
+    tags = ['train/giou_loss', 'train/obj_loss', 'train/cls_loss',
+            'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
+            'val/giou_loss', 'val/obj_loss', 'val/cls_loss']
+    for x, tag in zip(list(mloss[:-1]) + list(results), tags):
+        tb_writer.add_scalar(tag, x, epoch)
 ```
 
 ### opt
