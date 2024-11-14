@@ -18,6 +18,11 @@ yolov4: 论文解读
 
 https://zhuanlan.zhihu.com/p/137393450
 
+博客
+
+- 边界框、锚框、预测框 https://blog.csdn.net/lzzzzzzm/article/details/120621582
+- 遗传算法和kmeans聚类生成锚框
+
 ## utils/datasets.py
 
 ### rect
@@ -53,6 +58,9 @@ is default augmentation when not rect
 1. mosaic load
 
     1. 4 mosaic load
+
+        https://blog.csdn.net/dgvv4/article/details/123988282
+
     2. random_perspective()
 
 3. mix-up load
@@ -205,13 +213,13 @@ if not opt.evolve:
 
 ```bash
 python train.py \
-    --cfg models/yolov4s-mish.yaml \
+    --cfg models/yolov4m-mish.yaml \
     --data data/neu.yaml \
-    --epochs 300 \
+    --epochs 500 \
     --batch-size 16 \
     --img-size 200 200 \
-    --name yolov4s \
-    --device cpu \
+    --name yolov4m \
+    --device 0 \
     #--noautoanchor \
     #--cache-images
     #--hyp
@@ -221,3 +229,146 @@ python train.py \
     #--multi-scale
     #--single-cls
 ```
+
+## utils/utils.py
+
+### plot_images
+
+### build_targets
+
+- https://blog.csdn.net/u013066730/article/details/126969286
+- https://github.com/ultralytics/yolov5/issues/471
+- https://zhuanlan.zhihu.com/p/399153002
+- https://blog.csdn.net/wxd1233/article/details/126148680
+- 正样本分配 https://blog.csdn.net/u013066730/article/details/126969286
+
+## loss
+
+yolo loss解读: https://zhuanlan.zhihu.com/p/591833099
+
+```python
+# compute_loss
+# Define criteria
+lcls, lbox, lobj = ft([0]).to(device), ft([0]).to(device), ft([0]).to(device)
+tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
+
+BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([h['cls_pw']]), reduction=red).to(device)
+BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([h['obj_pw']]), reduction=red).to(device)
+
+# focal loss
+g = h['fl_gamma']  # focal loss gamma
+if g > 0:
+    BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
+
+# per output
+    nt = 0  # number of targets
+    np = len(p)  # layers of outputs
+    balance = [4.0, 1.0, 0.4] if np == 3 else [4.0, 1.0, 0.4, 0.1]  # P3-5 or P3-6
+    for i, pi in enumerate(p):  # layer index, layer predictions
+        b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+        tobj = torch.zeros_like(pi[..., 0]).to(device)  # target obj
+
+        nb = b.shape[0]  # number of targets
+        if nb:
+            nt += nb  # cumulative targets
+            ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
+
+            # lbox
+
+            # tObj
+
+            # lcls
+
+        lobj += BCEobj(pi[..., 4], tobj) * balance[i]  # obj loss
+
+    s = 3 / np  # output count scaling
+    lbox *= h['giou'] * s
+    lobj *= h['obj'] * s * (1.4 if np == 4 else 1.)
+    lcls *= h['cls'] * s
+    bs = tobj.shape[0]  # batch size
+    if red == 'sum':
+        g = 3.0  # loss gain
+        lobj *= g / bs
+        if nt:
+            lcls *= g / nt / model.nc
+            lbox *= g / nt
+
+    loss = lbox + lobj + lcls
+```
+
+### cls_loss
+
+```python
+if model.nc > 1:  # cls loss (only if multiple classes)
+    t = torch.full_like(ps[:, 5:], cn).to(device)  # targets
+    t[range(nb), tcls[i]] = cp
+    lcls += BCEcls(ps[:, 5:], t)  # BCE
+s = 3 / np  # output count scaling
+lcls *= h['cls'] * s
+if red == 'sum':
+    g = 3.0  # loss gain
+    if nt:
+        lcls *= g / nt / model.nc
+```
+
+### giou_loss/box_loss
+
+```python
+# GIoU
+pxy = ps[:, :2].sigmoid() * 2. - 0.5
+pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+pbox = torch.cat((pxy, pwh), 1).to(device)  # predicted box
+giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou(prediction, target)
+lbox += (1.0 - giou).sum() if red == 'sum' else (1.0 - giou).mean()  # giou loss
+s = 3 / np  # output count scaling
+lbox *= h['giou'] * s
+if red == 'sum':
+    g = 3.0  # loss gain
+    if nt:
+        lbox *= g / nt
+```
+
+### obj_loss
+
+```python
+# Obj
+tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
+lobj += BCEobj(pi[..., 4], tobj) * balance[i]  # obj loss
+s = 3 / np
+lobj *= h['obj'] * s * (1.4 if np == 4 else 1.)
+if red == 'sum':
+    bs = tobj.shape[0]  # batch size
+    g = 3.0  # loss gain
+    lobj *= g / bs
+```
+
+## test.py - metrics
+
+```python
+# Append statistics (correct, conf, pcls, tcls)
+stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
+
+p, r, ap, f1, ap_class = ap_per_class(*stats)
+p, r, ap50, ap = p[:, 0], r[:, 0], ap[:, 0], ap.mean(1)  # [P, R, AP@0.5, AP@0.5:0.95]
+mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
+```
+
+### mAP_{0.5}
+
+0.5的以上iou作为输出预测框，有tp，fp，fn，没有tn
+
+- precision tp / tp + fp
+- recall = tp / tp + fn
+- ap的计算，多少的objectiveness/conf以上作为tp
+
+### mAP_{0.5:0.95}
+
+0.5-0.95，10各iou，各自为基准确定输出预测框，最后10个值取平均
+
+### precision
+
+iou取的是0.5时的precision, positive_thresh=0.1
+
+### recall
+
+iou取的是0.5时的recall, positive_thresh=0.1
