@@ -82,8 +82,8 @@ def process_coco(json_file, img_dir):
 
 def parse_neu(xml_dir, img_dir):
     xml_files = glob.glob(xml_dir+'/*.xml')
-    cate_id_map = {}
-    cate_count = 0
+    # cate_id_map = {'scratches': 0, 'inclusion': 1, 'pitted_surface': 2, 'patches': 3, 'rolled-in_scale': 4, 'crazing': 5}
+    cate_id_map = {'scratches': 0, 'inclusion': 0, 'pitted_surface': 0, 'patches': 0, 'rolled-in_scale': 0, 'crazing': 0}
     for xml_file in xml_files:
         with open(xml_file, 'r+') as f:
             xml = f.read(-1)
@@ -95,10 +95,6 @@ def parse_neu(xml_dir, img_dir):
         objs = []
         for obj in obj_list:
             cate_id = cate_id_map.get(obj['name'])
-            if cate_id is None:
-                cate_id = cate_count
-                cate_count += 1
-            cate_id_map[obj['name']] = cate_id
             # print(obj['name'], cate_id)
             xmin, ymin, xmax, ymax = int(obj['bndbox']['xmin']), int(obj['bndbox']['ymin']), int(obj['bndbox']['xmax']), int(obj['bndbox']['ymax'])
             w, h = xmax-xmin, ymax-ymin
@@ -110,7 +106,7 @@ def parse_neu(xml_dir, img_dir):
                 f.write('{} {} {} {} {}\n'.format(*obj))
     print(cate_id_map)
 
-# parse_neu('dataset/neu/ANNOTATIONS', 'dataset/neu/IMAGES')
+parse_neu('dataset/neu/ANNOTATIONS', 'dataset/neu/IMAGES')
 
 def split_neu(img_dir):
     p1 = os.path.join(img_dir, 'train.txt')

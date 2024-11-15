@@ -234,6 +234,8 @@ python train.py \
 
 ### plot_images
 
+输出0.3以上置信度的框，且如果文件存在，不重新绘图
+
 ### build_targets
 
 - https://blog.csdn.net/u013066730/article/details/126969286

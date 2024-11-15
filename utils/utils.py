@@ -219,9 +219,9 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
     Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
     # Arguments
         tp:    True positives (nparray, nx1 or nx10).
-        conf:  Objectness value from 0-1 (nparray).
-        pred_cls: Predicted object classes (nparray).
-        target_cls: True object classes (nparray).
+        conf:  Objectness value from 0-1 (nparray). #n
+        pred_cls: Predicted object classes (nparray). #n
+        target_cls: True object classes (nparray). #n
     # Returns
         The average precision as computed in py-faster-rcnn.
     """
@@ -235,30 +235,30 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
 
     # Create Precision-Recall curve and compute AP for each class
     pr_score = 0.1  # score to evaluate P and R https://github.com/ultralytics/yolov3/issues/898
-    s = [unique_classes.shape[0], tp.shape[1]]  # number class, number iou thresholds (i.e. 10 for mAP0.5...0.95)
-    ap, p, r = np.zeros(s), np.zeros(s), np.zeros(s)
+    s = [unique_classes.shape[0], tp.shape[1]]  # number class, number iou thresholds (i.e. 10 for mAP0.5...0.95) # [6,10]
+    ap, p, r = np.zeros(s), np.zeros(s), np.zeros(s) #[6, 10]
     for ci, c in enumerate(unique_classes):
-        i = pred_cls == c
-        n_gt = (target_cls == c).sum()  # Number of ground truth objects
-        n_p = i.sum()  # Number of predicted objects
+        i = pred_cls == c #[n]
+        n_gt = (target_cls == c).sum()  # Number of ground truth objects #[1]
+        n_p = i.sum()  # Number of predicted objects #[1]
 
         if n_p == 0 or n_gt == 0:
             continue
         else:
             # Accumulate FPs and TPs
-            fpc = (1 - tp[i]).cumsum(0)
-            tpc = tp[i].cumsum(0)
+            fpc = (1 - tp[i]).cumsum(0) # [n_c, 10]
+            tpc = tp[i].cumsum(0) # [n_c, 10]
 
             # Recall
-            recall = tpc / (n_gt + 1e-16)  # recall curve
-            r[ci] = np.interp(-pr_score, -conf[i], recall[:, 0])  # r at pr_score, negative x, xp because xp decreases
+            recall = tpc / (n_gt + 1e-16)  # recall curve # [n_c, 10]
+            r[ci] = np.interp(-pr_score, -conf[i], recall[:, 0])  # r at pr_score, negative x, xp because xp decreases, at iou=0.5, t=0.1
 
             # Precision
             precision = tpc / (tpc + fpc)  # precision curve
-            p[ci] = np.interp(-pr_score, -conf[i], precision[:, 0])  # p at pr_score
+            p[ci] = np.interp(-pr_score, -conf[i], precision[:, 0])  # p at pr_score, at iou=0.5, t=0.1
 
             # AP from recall-precision curve
-            for j in range(tp.shape[1]):
+            for j in range(tp.shape[1]): # 填充10 个 iou下的ap
                 ap[ci, j] = compute_ap(recall[:, j], precision[:, j])
 
             # Plot
@@ -440,7 +440,7 @@ class BCEBlurWithLogitsLoss(nn.Module):
 def compute_loss(p, targets, model):  # predictions, targets, model
     device = targets.device
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj = ft([0]).to(device), ft([0]).to(device), ft([0]).to(device)
+    lcls, lbox, lobj = ft([0]).to(device), ft([0]).to(device), ft([0]).to(device) # 3 scalar tensor
     tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
     h = model.hyp  # hyperparameters
     red = 'mean'  # Loss reduction (sum or mean)
