@@ -60,3 +60,13 @@ python train.py \
 # depth-wise-conv
 # prune
 # dw + 
+
+python train.py \
+    --cfg models/yolov4tb-mish.yaml \
+    --data data/neu.yaml \
+    --epochs 300 \
+    --batch-size 16 \
+    --img-size 200 200 \
+    --name yolov4tb-abnormal \
+    --device 0 \
+    --single-cls

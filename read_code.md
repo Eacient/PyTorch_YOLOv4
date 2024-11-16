@@ -374,3 +374,52 @@ iou取的是0.5时的precision, positive_thresh=0.1
 ### recall
 
 iou取的是0.5时的recall, positive_thresh=0.1
+
+## models
+
+### parse_model
+
+1. parse_anchors
+
+    ```python
+    anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
+    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
+    no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
+    ```
+
+2. parse backbone and head
+
+    ```python
+    # [from, number, module, args]
+    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
+
+    # block: scale depth
+    n = max(round(n * gd), 1) if n > 1 else n  # depth gain
+
+    # conv ro conv blocks: process cin and cout
+    if m in [nn.Conv2d, Conv, Bottleneck, SPP, DWConv, MixConv2d, Focus, CrossConv, BottleneckCSP, BottleneckCSP2, SPPCSP, VoVCSP, C3]:
+
+    # cin and cout
+    c1, c2 = ch[f], args[0]
+
+    # scale channel and multiple of 8
+    c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
+
+    # conv blocks: append depth to args
+    if m in [BottleneckCSP, BottleneckCSP2, SPPCSP, VoVCSP, C3]:
+
+    # batch_norm2d: input channel
+    elif m is nn.BatchNorm2d:
+        args = [ch[f]]
+    # concat: write this layer output channel
+    elif m is Concat:
+        c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
+    # detect: add all input channels, number of anchors
+    elif m is Detect:
+        args.append([ch[x + 1] for x in f])
+        if isinstance(args[1], int):  # number of anchors
+            args[1] = [list(range(args[1] * 2))] * len(f)
+    # else: write this layer output channel
+    else:
+        c2 = ch[f]
+    ```
