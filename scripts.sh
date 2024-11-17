@@ -62,11 +62,11 @@ python train.py \
 # dw + 
 
 python train.py \
-    --cfg models/yolov4tb-mish.yaml \
-    --data data/neu.yaml \
+    --cfg models/yolov4s-mish.yaml \
+    --data data/neu-gen-scaled.yaml \
     --epochs 300 \
     --batch-size 16 \
     --img-size 200 200 \
-    --name yolov4tb-abnormal \
+    --name yolov4s-gen-scaled \
     --device 0 \
     --single-cls
