@@ -106,7 +106,7 @@ def parse_neu(xml_dir, img_dir):
                 f.write('{} {} {} {} {}\n'.format(*obj))
     print(cate_id_map)
 
-parse_neu('dataset/neu/ANNOTATIONS', 'dataset/neu/IMAGES')
+# parse_neu('dataset/neu/ANNOTATIONS', 'dataset/neu/IMAGES')
 
 def split_neu(img_dir):
     p1 = os.path.join(img_dir, 'train.txt')
@@ -147,14 +147,25 @@ def split_neu(img_dir):
 
 # split_neu('dataset/neu/IMAGES')
 
-LoadImagesAndLabels('dataset/neu/IMAGES/test.txt',
+
+dataset = LoadImagesAndLabels('dataset/neu/train-aug0.txt',
                     img_size=640,
                     batch_size=16,
-                    augment=False, # mosaic and other augment
-                    hyp=None, #
+                    augment=True, # mosaic and other augment
+                    hyp={'use_ae': True,
+                          'hsv_h': 0.015,  # image HSV-Hue augmentation (fraction)
+                            'hsv_s': 0.7,  # image HSV-Saturation augmentation (fraction)
+                            'hsv_v': 0.4,  # image HSV-Value augmentation (fraction)
+                            'degrees': 0.0,  # image rotation (+/- deg)
+                            'translate': 0.0,  # image translation (+/- fraction)
+                            'scale': 0.5,  # image scale (+/- gain)
+                            'shear': 0.0},  # image shear (+/- deg)},
                     rect=False,
                     image_weights=False,
                     cache_images=False,
                     single_cls=False,
                     stride=32,
                     pad=0)
+nom, img, mask, label, img_file, _ = dataset[999]
+print(nom.shape, img.shape, mask.shape, label.shape)
+print(nom[0])

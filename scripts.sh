@@ -62,11 +62,12 @@ python train.py \
 # dw + 
 
 python train.py \
-    --cfg models/yolov4s-mish.yaml \
-    --data data/neu-gen-scaled.yaml \
+    --cfg models/yolov4s-ae.yaml \
+    --data data/neu-aug-train.yaml \
     --epochs 300 \
     --batch-size 16 \
     --img-size 200 200 \
-    --name yolov4s-gen-scaled \
+    --name yolov4s-ae-aug-train \
     --device 0 \
-    --single-cls
+    --single-cls \
+    --ae

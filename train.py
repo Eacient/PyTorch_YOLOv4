@@ -10,11 +10,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 import test  # import test.py to get mAP after each epoch
 from models.yolo import Model
+from models.ae_yolo import AEModel, compute_loss_ae
 from utils import google_utils
 from utils.datasets import *
 from utils.utils import *
 
-mixed_precision = True
+mixed_precision = False
 try:  # Mixed precision training https://github.com/NVIDIA/apex
     from apex import amp
 except:
@@ -31,6 +32,9 @@ hyp = {'optimizer': 'SGD',  # ['adam', 'SGD', None] if none, default is SGD
        'cls_pw': 1.0,  # cls BCELoss positive_weight
        'obj': 1.0,  # obj loss gain (*=img_size/320 if img_size != 320)
        'obj_pw': 1.0,  # obj BCELoss positive_weight
+       'use_ae': False,
+       'rec': 0.5,
+       'feat': 0.5,
        'iou_t': 0.20,  # iou training threshold
        'anchor_t': 4.0,  # anchor-multiple threshold
        'fl_gamma': 0.0,  # focal loss gamma (efficientDet default is gamma=1.5)
@@ -77,7 +81,11 @@ def train(hyp, tb_writer, opt, device):
             os.remove(f)
 
     # Create model
-    model = Model(opt.cfg, nc=nc).to(device)
+    if opt.ae:
+        model = AEModel(opt.cfg, nc=nc).to(device)
+        hyp['use_ae'] = True
+    else:
+        model = Model(opt.cfg, nc=nc).to(device)
 
     # Image sizes
     gs = int(max(model.stride))  # grid size (max stride)
@@ -192,7 +200,7 @@ def train(hyp, tb_writer, opt, device):
     if rank in [-1, 0]:
         # local_rank is set to -1. Because only the first process is expected to do evaluation.
         testloader = create_dataloader(test_path, imgsz_test, total_batch_size, gs, opt, hyp=hyp, augment=False,
-                                       cache=opt.cache_images, rect=True, local_rank=-1, world_size=opt.world_size)[0]
+                                       cache=opt.cache_images, rect=True, local_rank=-1, world_size=opt.world_size, train=False)[0]
 
     # Model parameters
     hyp['cls'] *= nc / 80.  # scale coco-tuned hyp['cls'] to current dataset
@@ -252,15 +260,26 @@ def train(hyp, tb_writer, opt, device):
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
         # dataset.mosaic_border = [b - imgsz, -b]  # height, width borders
 
-        mloss = torch.zeros(4, device=device)  # mean losses
+        if opt.ae:
+            mloss = torch.zeros(6, device=device)  # mean losses
+        else:
+            mloss = torch.zeros(4, device=device)  # mean losses
+
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
         if rank in [-1, 0]:
-            print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
+            if opt.ae:
+                print(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'rec', 'feat', 'total', 'targets', 'img_size'))
+            else:
+                print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
             pbar = tqdm(pbar, total=nb)  # progress bar
         optimizer.zero_grad()
-        for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+        for i, data_batch in pbar:  # batch -------------------------------------------------------------
+            if not opt.ae:
+                (imgs, targets, paths, _) = data_batch
+            else:
+                (imgs, targets, masks, paths, _) = data_batch
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
 
@@ -284,10 +303,16 @@ def train(hyp, tb_writer, opt, device):
                     imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
 
             # Forward
-            pred = model(imgs)
+            if opt.ae:
+                pred, rec_loss, feat_loss = model(imgs)
+            else:
+                pred = model(imgs)
 
             # Loss
-            loss, loss_items = compute_loss(pred, targets.to(device), model)  # scaled by batch_size
+            if opt.ae:
+                loss, loss_items = compute_loss_ae(pred, rec_loss, feat_loss, masks.to(device), targets.to(device), model)
+            else:
+                loss, loss_items = compute_loss(pred, targets.to(device), model)  # scaled by batch_size
             if rank != -1:
                 loss *= opt.world_size  # gradient averaged between devices in DDP mode
             if not torch.isfinite(loss):
@@ -312,8 +337,12 @@ def train(hyp, tb_writer, opt, device):
             if rank in [-1, 0]:
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-                s = ('%10s' * 2 + '%10.4g' * 6) % (
-                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
+                if opt.ae:
+                    s = ('%10s' * 2 + '%10.4g' * 8) % (
+                        '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
+                else:
+                    s = ('%10s' * 2 + '%10.4g' * 6) % (
+                        '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -353,7 +382,7 @@ def train(hyp, tb_writer, opt, device):
 
                 # Tensorboard
                 if tb_writer:
-                    tags = ['train/giou_loss', 'train/obj_loss', 'train/cls_loss',
+                    tags = ['train/giou_loss', 'train/obj_loss', 'train/cls_loss', 'train/rec_loss', 'train/feat_loss',
                             'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
                             'val/giou_loss', 'val/obj_loss', 'val/cls_loss']
                     for x, tag in zip(list(mloss[:-1]) + list(results), tags):
@@ -426,6 +455,7 @@ if __name__ == '__main__':
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
+    parser.add_argument('--ae', action='store_true', help='add bottleneck struct')
     opt = parser.parse_args()
 
     last = get_latest_run() if opt.resume == 'get_last' else opt.resume  # resume from most recent run

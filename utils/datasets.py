@@ -46,7 +46,7 @@ def exif_size(img):
     return s
 
 
-def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False, local_rank=-1, world_size=1):
+def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False, local_rank=-1, world_size=1, train=True):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache.
     with torch_distributed_zero_first(local_rank):
         dataset = LoadImagesAndLabels(path, imgsz, batch_size,
@@ -57,7 +57,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                     single_cls=opt.single_cls,
                                     stride=int(stride),
                                     pad=pad)
-
+    use_ae = hyp['use_ae'] and train
     batch_size = min(batch_size, len(dataset))
     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, 8])  # number of workers
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if local_rank != -1 else None
@@ -66,7 +66,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                              num_workers=nw,
                                              sampler=train_sampler,
                                              pin_memory=True,
-                                             collate_fn=LoadImagesAndLabels.collate_fn)
+                                             collate_fn=LoadImagesAndLabels.collate_fn if use_ae else LoadImagesAndLabels.collate_fn_val)
     return dataloader, dataset
 
 
@@ -167,6 +167,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 else:
                     raise Exception('%s does not exist' % p)
             self.img_files = sorted([x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in img_formats])
+            self.orig_count = len(self.img_files) - sum([1 if 'gen' in _ else 0 for _ in self.img_files])
+            self.use_ae = False
+            if hyp['use_ae'] and 'train' in path:
+                self.use_ae = True
+                self.nmo_files = [str(Path(_).parent)+'/normal/'+_.split('/')[-1] for _ in self.img_files]
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (path, e, help_url))
 
@@ -214,6 +219,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             ar = s[:, 1] / s[:, 0]  # aspect ratio
             irect = ar.argsort()
             self.img_files = [self.img_files[i] for i in irect]
+            if self.use_ae:
+                self.nmo_files = [self.nmo_files[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
             self.labels = [self.labels[i] for i in irect]
             self.shapes = s[irect]  # wh
@@ -343,6 +350,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if self.mosaic:
             # Load mosaic
             img, labels = load_mosaic(self, index)
+            # print(mask)
             shapes = None
 
             # MixUp https://arxiv.org/pdf/1710.09412.pdf
@@ -419,11 +427,23 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
+        if not self.use_ae:
+            return torch.from_numpy(img), labels_out, self.img_files[index], shapes
+        else:
+            img = torch.from_numpy(img)
+            mask = 0 if index < self.orig_count else 1
+            return *torch.chunk(img, 2, 0), torch.Tensor([mask,]), labels_out, self.img_files[index], shapes
 
-        return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
     @staticmethod
     def collate_fn(batch):
+        nom, img, mask, label, path, shapes = zip(*batch)
+        for i, l in enumerate(label):
+            l[:, 0] = i  # add target image index for build_targets()
+        return torch.stack(img+nom, 0), torch.cat(label, 0), torch.cat(mask, 0), path, shapes
+        
+    @staticmethod
+    def collate_fn_val(batch):
         img, label, path, shapes = zip(*batch)  # transposed
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
@@ -436,6 +456,13 @@ def load_image(self, index):
     if img is None:  # not cached
         path = self.img_files[index]
         img = cv2.imread(path)  # BGR
+        if self.use_ae:
+            # print(self.nmo_files[index])
+            if os.path.exists(self.nmo_files[index]):
+                nom = cv2.imread(self.nmo_files[index])
+            else:
+                nom = np.zeros_like(img)
+            img = np.concatenate([img, nom], axis=2)
         assert img is not None, 'Image Not Found ' + path
         h0, w0 = img.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # resize image to img_size
@@ -472,7 +499,11 @@ def load_mosaic(self, index):
     labels4 = []
     s = self.img_size
     yc, xc = [int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border]  # mosaic center x, y
-    indices = [index] + [random.randint(0, len(self.labels) - 1) for _ in range(3)]  # 3 additional image indices
+    if index < self.orig_count:
+        bound = [0, self.orig_count-1]
+    else:
+        bound = [self.orig_count, len(self.labels)-1]
+    indices = [index] + [random.randint(*bound) for _ in range(3)]  # 3 additional image indices
     for i, index in enumerate(indices):
         # Load image
         img, _, (h, w) = load_image(self, index)
@@ -545,6 +576,8 @@ def replicate(img, labels):
 
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True):
+    if img.shape[2] > 3:
+        color = (104, 104, 104)
     # Resize image to a 32-pixel-multiple rectangle https://github.com/ultralytics/yolov3/issues/232
     shape = img.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):

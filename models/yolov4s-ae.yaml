@@ -20,7 +20,7 @@ backbone:
    [-1, 1, Conv, [128, 3, 2]],  # 4-P2/4
    [-1, 2, BottleneckCSP, [128]],
    [-1, 1, Conv, [256, 3, 2]],  # 6-P3/8
-   [-1, 2, AEBottleneck, [[64, 32, 16]]], # 7 /8 /16 /32 [/64] /32 /16 /8
+   [-1, 2, AEBottleneck, [[64, 16]]], # 7 /8 /16 [/32] /16 /8
    [[-1, -2], 1, Concat, [1]], # 8 /8 c*2
    [-1, 1, ABNChunk, []], # 9 abn batch
    [-1, 8, BottleneckCSP, [256]], # 10
@@ -60,8 +60,9 @@ head:
 rec-head: #both batch
   [
     [0, 1, FrozeChunk, []], #36
+    [-1, 1, Repeat, []],
     [7, 2, AEHead, [[128, 64, 32]]], #37 /4 /2 /1
-    [[-1, -2], 1, MSE, ['mean']], #38 mse loss
+    [[-1, -2], 1, MSE, []], #38 mse loss
 
   ]
 
@@ -69,5 +70,5 @@ feat-head: #only abn batch regression
   [
     [6, 1, FrozeChunk, []], #39
     [7, 1, ABNChunk, []], #40
-    [[-1, -2], 1, Cosine, [1, 1e-6]], # 41 cosine loss
+    [[-1, -2], 1, Cosine, []], # 41 cosine loss
   ]
