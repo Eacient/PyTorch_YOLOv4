@@ -1,0 +1,73 @@
+# parameters
+nc: 80  # number of classes
+depth_multiple: 0.33  # model depth multiple
+width_multiple: 0.50  # layer channel multiple
+
+# anchors
+anchors:
+  - [12,16, 19,36, 40,28]  # P3/8
+  - [36,75, 76,55, 72,146]  # P4/16
+  - [142,110, 192,243, 459,401]  # P5/32
+
+# yolov4s backbone
+backbone:
+  # [from, number, module, args] args[channel, kernel, stride]
+  [
+   [-1, 1, Identity, []], # 0
+   [-1, 1, Conv, [32, 3, 1]],  # 1
+   [-1, 1, Conv, [64, 3, 2]],  # 2-P1/2
+   [-1, 1, Bottleneck, [64]],
+   [-1, 1, Conv, [128, 3, 2]],  # 4-P2/4
+   [-1, 2, BottleneckCSP, [128]],
+   [-1, 1, Conv, [256, 3, 2]],  # 6-P3/8
+   [-1, 2, AEBottleneck, [[64, 32, 16]]], # 7 /8 /16 /32 [/64] /32 /16 /8
+   [[-1, -2], 1, Concat, [1]], # 8 /8 c*2
+   [-1, 1, ABNChunk, []], # 9 abn batch
+   [-1, 8, BottleneckCSP, [256]], # 10
+   [-1, 1, Conv, [512, 3, 2]],  # 11-P4/16
+   [-1, 8, BottleneckCSP, [512]], # 12
+   [-1, 1, Conv, [1024, 3, 2]], # 13-P5/32
+   [-1, 4, BottleneckCSP, [1024]],  # 14
+  ]
+
+# yolov4s head
+# na = len(anchors[0])
+head:
+  [[-1, 1, SPPCSP, [512]], # 15
+   [-1, 1, Conv, [256, 1, 1]],
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+   [12, 1, Conv, [256, 1, 1]], # route backbone P4
+   [[-1, -2], 1, Concat, [1]],
+   [-1, 2, BottleneckCSP2, [256]], # 20 
+   [-1, 1, Conv, [128, 1, 1]],
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],
+   [10, 1, Conv, [128, 1, 1]], # route backbone P3
+   [[-1, -2], 1, Concat, [1]],
+   [-1, 2, BottleneckCSP2, [128]], # 25
+   [-1, 1, Conv, [256, 3, 1]],
+   [-2, 1, Conv, [256, 3, 2]],
+   [[-1, 20], 1, Concat, [1]],  # cat
+   [-1, 2, BottleneckCSP2, [256]], # 29
+   [-1, 1, Conv, [512, 3, 1]],
+   [-2, 1, Conv, [512, 3, 2]],
+   [[-1, 15], 1, Concat, [1]],  # cat
+   [-1, 2, BottleneckCSP2, [512]], # 33
+   [-1, 1, Conv, [1024, 3, 1]],
+
+   [[26,30,34], 1, Detect, [nc, anchors]],   # Detect(P3, P4, P5)
+  ]
+
+rec-head: #both batch
+  [
+    [0, 1, FrozeChunk, []], #36
+    [7, 2, AEHead, [[128, 64, 32]]], #37 /4 /2 /1
+    [[-1, -2], 1, MSE, ['mean']], #38 mse loss
+
+  ]
+
+feat-head: #only abn batch regression
+  [
+    [6, 1, FrozeChunk, []], #39
+    [7, 1, ABNChunk, []], #40
+    [[-1, -2], 1, Cosine, [1, 1e-6]], # 41 cosine loss
+  ]

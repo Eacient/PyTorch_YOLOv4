@@ -1,6 +1,7 @@
 import argparse
 from copy import deepcopy
-
+import sys
+sys.path.append('.')
 from models.experimental import *
 
 
@@ -68,7 +69,7 @@ class Model(nn.Module):
             m = self.model[-1]  # Detect()
             if isinstance(m, Detect):
                 s = 128  # 2x min stride
-                m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+                m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(2, ch, s, s))])  # forward
                 m.anchors /= m.stride.view(-1, 1, 1)
                 check_anchor_order(m)
                 self.stride = m.stride
@@ -102,6 +103,7 @@ class Model(nn.Module):
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
         for m in self.model:
+            print(m.i)
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
@@ -172,10 +174,10 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
             except:
                 pass
-
-        n = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [nn.Conv2d, Conv, DsConv, Bottleneck, DsBottleneck, SPP, DWConv, MixConv2d, Focus, CrossConv, BottleneckCSP, DsBottleneckCSP, BottleneckCSP2, DsBottleneckCSP2, SPPCSP, DsSPPCSP, VoVCSP, C3]:
-            c1, c2 = ch[f], args[0]
+        if not m in [AEBottleneck, AEHead]:
+            n = max(round(n * gd), 1) if n > 1 else n  # depth gain
+        if m in [AEBottleneck, AEHead, nn.Conv2d, Conv, DsConv, Bottleneck, DsBottleneck, SPP, DWConv, MixConv2d, Focus, CrossConv, BottleneckCSP, DsBottleneckCSP, BottleneckCSP2, DsBottleneckCSP2, SPPCSP, DsSPPCSP, VoVCSP, C3]:
+            c1, c2 = ch[f if f < 0 else f+1], args[0]
 
             # Normal
             # if i > 0 and args[0] != no:  # channel expansion factor
@@ -184,7 +186,10 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             #     c2 = int(ch[1] * ex ** e)
             # if m != Focus:
 
-            c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
+            if isinstance(c2, list):
+                c2 = [make_divisible(_ * gw, 8) for _ in c2]
+            else:
+                c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
 
             # Experimental
             # if i > 0 and args[0] != no:  # channel expansion factor
@@ -196,19 +201,21 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             #     c2 = make_divisible(c2, 8) if c2 != no else c2
 
             args = [c1, c2, *args[1:]]
-            if m in [BottleneckCSP, DsBottleneckCSP, BottleneckCSP2, DsBottleneckCSP2, SPPCSP, DsSPPCSP, VoVCSP, C3]:
+            if m in [AEBottleneck, AEHead, BottleneckCSP, DsBottleneckCSP, BottleneckCSP2, DsBottleneckCSP2, SPPCSP, DsSPPCSP, VoVCSP, C3]:
                 args.insert(2, n)
                 n = 1
+            if m in [AEHead]:
+                args.insert(3, ch[0])
         elif m is nn.BatchNorm2d:
-            args = [ch[f]]
+            args = [ch[f if f < 0 else f+1]]
         elif m is Concat:
-            c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
+            c2 = sum([ch[x if x < 0 else x + 1] for x in f])
         elif m is Detect:
             args.append([ch[x + 1] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
         else:
-            c2 = ch[f]
+            c2 = ch[f if f < 0 else f+1]
 
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
@@ -217,21 +224,32 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         print('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
-        ch.append(c2)
+        if m is AEBottleneck:
+            ch.append(c1)
+        elif m is AEHead:
+            ch.append(ch[0])
+        else:
+            ch.append(c2)
+    print(ch)
     return nn.Sequential(*layers), sorted(save)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolov5s.yaml', help='model.yaml')
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    opt = parser.parse_args()
-    opt.cfg = check_file(opt.cfg)  # check file
-    device = torch_utils.select_device(opt.device)
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--cfg', type=str, default='yolov5s.yaml', help='model.yaml')
+    # parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    # opt = parser.parse_args()
+    # opt.cfg = check_file(opt.cfg)  # check file
+    # device = torch_utils.select_device(opt.device)
 
-    # Create model
-    model = Model(opt.cfg).to(device)
-    model.train()
+    # # Create model
+    # model = Model(opt.cfg).to(device)
+    # model.train()
+
+    # with open('models/yolov4s-ae.yaml', 'r+') as f:
+    #     cfg = yaml.load(f, Loader=yaml.FullLoader)
+    # print(cfg)
+    model = Model('models/yolov4s-ae.yaml')
 
     # Profile
     # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
