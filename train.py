@@ -7,6 +7,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
+from torch import autocast, GradScaler
 
 import test  # import test.py to get mAP after each epoch
 from models.yolo import Model
@@ -14,13 +15,7 @@ from utils import google_utils
 from utils.datasets import *
 from utils.utils import *
 
-mixed_precision = True
-try:  # Mixed precision training https://github.com/NVIDIA/apex
-    from apex import amp
-except:
-    print('Apex recommended for faster mixed precision training: https://github.com/NVIDIA/apex')
-    mixed_precision = False  # not installed
-
+mixed_precision=False
 # Hyperparameters
 hyp = {'optimizer': 'SGD',  # ['adam', 'SGD', None] if none, default is SGD
        'lr0': 0.01,  # initial learning rate (SGD=1E-2, Adam=1E-3)
@@ -155,8 +150,8 @@ def train(hyp, tb_writer, opt, device):
         del ckpt
 
     # Mixed precision training https://github.com/NVIDIA/apex
-    if mixed_precision:
-        model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
+    # if mixed_precision:
+    #     model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
 
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     lf = lambda x: (((1 + math.cos(x * math.pi / epochs)) / 2) ** 1.0) * 0.8 + 0.2  # cosine
@@ -227,6 +222,7 @@ def train(hyp, tb_writer, opt, device):
         print('Using %g dataloader workers' % dataloader.num_workers)
         print('Starting training for %g epochs...' % epochs)
     # torch.autograd.set_detect_anomaly(True)
+    scalar = GradScaler()
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
 
@@ -284,10 +280,15 @@ def train(hyp, tb_writer, opt, device):
                     imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
 
             # Forward
-            pred = model(imgs)
-
-            # Loss
-            loss, loss_items = compute_loss(pred, targets.to(device), model)  # scaled by batch_size
+            if mixed_precision:
+                with autocast(device_type='cuda', dtype=torch.float16):
+                    pred = model(imgs)
+                    # Loss
+                    loss, loss_items = compute_loss(pred, targets.to(device), model)  # scaled by batch_size
+            else:
+                pred = model(imgs)
+                # Loss
+                loss, loss_items = compute_loss(pred, targets.to(device), model)  # scaled by batch_size
             if rank != -1:
                 loss *= opt.world_size  # gradient averaged between devices in DDP mode
             if not torch.isfinite(loss):
@@ -296,17 +297,22 @@ def train(hyp, tb_writer, opt, device):
 
             # Backward
             if mixed_precision:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
+                scalar.scale(loss).backward()
+
+                # Optimize
+                if ni % accumulate == 0:
+                    scalar.step(optimizer)
+                    scalar.update()
+                    if ema is not None:
+                        ema.update(model)
             else:
                 loss.backward()
-
-            # Optimize
-            if ni % accumulate == 0:
-                optimizer.step()
-                optimizer.zero_grad()
-                if ema is not None:
-                    ema.update(model)
+                # Optimize
+                if ni % accumulate == 0:
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    if ema is not None:
+                        ema.update(model)
 
             # Print
             if rank in [-1, 0]:
@@ -441,7 +447,7 @@ if __name__ == '__main__':
         with open(opt.hyp) as f:
             hyp.update(yaml.load(f, Loader=yaml.FullLoader))  # update hyps
     opt.img_size.extend([opt.img_size[-1]] * (2 - len(opt.img_size)))  # extend to 2 sizes (train, test)
-    device = torch_utils.select_device(opt.device, apex=mixed_precision, batch_size=opt.batch_size)
+    device = torch_utils.select_device(opt.device, apex=False, batch_size=opt.batch_size)
     opt.total_batch_size = opt.batch_size
     opt.world_size = 1
     if device.type == 'cpu':
