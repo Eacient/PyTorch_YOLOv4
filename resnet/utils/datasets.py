@@ -36,21 +36,21 @@ def get_mhist_loader(root, transform, split='train', mixup=False, cutmix=False, 
     ), labels
 
 def get_preproc_transform(input_size=(224,224),
-                          degrees=(-45, 45),
-                          translate=(15/224, 15/224),
-                          shear=(-0.9, 0.9, -0.9, 0.9),
-                          scale=(0.8, 1.2),
+                          degrees=45,
+                          translate=0.06,
+                          shear=0.9,
+                          scale=0.2,
                           hue=0.1,
                           saturation=0.3,
-                          brightness=(0.28, 2.8),
-                          contrast=(0.28, 2.8),
+                          brightness=0.3,
+                          contrast=0.3,
                           sharpness=1.3,
                           norm=True):
     return v2.Compose([
         v2.PILToTensor(),
         # shape
-        v2.RandomAffine(degrees=degrees, translate=translate, shear=shear),
-        v2.RandomResizedCrop(size=input_size, scale=scale, antialias=True),
+        v2.RandomAffine(degrees=degrees, translate=(-translate, translate), shear=(-shear,shear,-shear,shear)),
+        v2.RandomResizedCrop(size=input_size, scale=(1-scale, 1+scale), antialias=True),
         v2.RandomHorizontalFlip(p=0.5),
         v2.RandomVerticalFlip(p=0.5),
         # color

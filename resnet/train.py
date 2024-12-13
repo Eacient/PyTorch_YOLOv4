@@ -30,8 +30,8 @@ hyp = {'optimizer': 'SGD',  # ['adam', 'SGD', None] if none, default is SGD
        'contrast': 0,
        'sharpness': 1,
        'degrees': 0,  # image rotation (+/- deg)
-       'translate': (0,0),  # image translation (+/- fraction)
-       'scale': (0.8, 1.2),  # image scale (+/- gain)
+       'translate': 0,  # image translation (+/- fraction)
+       'scale': 0.2,  # image scale (+/- gain)
        'shear': 0}  # image shear (+/- deg)
 
 
@@ -290,7 +290,7 @@ def train(hyp, tb_writer, opt, device):
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate accuracy
                 acc, loss = test.test(opt.data, 
-                                      model=ema.ema.module if hasattr(ema.ema, 'module') else ema.ema, 
+                                      model=(ema.ema.module if hasattr(ema.ema, 'module') else ema.ema) if ema else model, 
                                       dataloader=testloader, half_test=half_test)
                 # Write
                 with open(results_file, 'a') as f:
