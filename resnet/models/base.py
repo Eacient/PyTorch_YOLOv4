@@ -37,7 +37,7 @@ class ResBottleneck(nn.Module):
         self.conv2 = ReLUConv(c_, c_, 3, s, g=g)
         self.conv3 = ReLUConv(c_, c2, 1, 1, act=False)
         if shortcut:
-            if c1 != c2 and s != 1:
+            if c1 != c2 or s != 1:
                 self.conv_path = ReLUConv(c1, c2, k=1, s=s, act=False)
             else:
                 self.conv_path = nn.Identity()
