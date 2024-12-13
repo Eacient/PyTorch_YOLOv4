@@ -11,7 +11,7 @@ from torch import autocast, GradScaler
 
 import resnet.test as test  # import test.py to get mAP after each epoch
 from resnet.models.resnet import Resnet, get_opt_param_groups_cnn, get_warmup_tuner
-from resnet.utils.datasets import get_mhist_loader, get_preproc_transform, get_test_transform
+from resnet.utils.datasets import get_mhist_loader, get_preproc_transform, get_test_transform, plot_train_images 
 from utils import google_utils
 from utils.datasets import *
 from utils.utils import *
@@ -265,12 +265,12 @@ def train(hyp, tb_writer, opt, device):
             print(('\n' + '%10s' * 4) % ('Epoch', 'gpu_mem', 'lr', 'cls_loss'))
             pbar = tqdm(pbar, total=nb)  # progress bar
         mloss = torch.zeros(1, device=device)  # mean losses
-        for i, batch in pbar:  # batch -------------------------------------------------------------
+        for i, (imgs, targets) in pbar:  # batch -------------------------------------------------------------
             ni = i + nb * epoch  # number integrated batches (since train start)
             # Warmup
             if warmup_scheduler and ni < nw:
                 accumulate = warmup_scheduler(optimizer, epoch, ni)
-            loss_scala = stoastic_batch_update(model, optimizer, device, loss_func, batch, ni, accumulate, ema)
+            loss_scala = stoastic_batch_update(model, optimizer, device, loss_func, (imgs, targets), ni, accumulate, ema)
             if loss_scala < 0:
                 return
             # Print
@@ -280,7 +280,13 @@ def train(hyp, tb_writer, opt, device):
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
                 s = ('%10s' * 2 + '%10.2g' + '%10.4g' * 1) % ('%g/%g' % (epoch, epochs - 1), mem, optimizer.param_groups[0]['lr'], *mloss)
                 pbar.set_description(s)
-
+                # Plot
+                if ni < 3:
+                    f = str(Path(log_dir) / ('train_batch%g.jpg' % ni))  # filename
+                    result = plot_train_images(images=imgs, targets=targets, fname=f)
+                    if tb_writer and result is not None:
+                        tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)
+                        # tb_writer.add_graph(model, imgs)  # add model to tensorboard
             # end batch ------------------------------------------------------------------------------------------------
 
         # Scheduler
