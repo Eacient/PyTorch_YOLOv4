@@ -10,8 +10,8 @@ def init_weights(m:nn.Module, gain=0.5, eps=1e-4, inplace=True):
     # 1. conv weights
     if t is nn.Conv2d:
         # print('conv weight')
-        nn.init.xavier_normal_(m.weight, gain=gain)
-        # nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        # nn.init.xavier_normal_(m.weight, gain=gain)
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
     # 2. linear weights
     elif t is nn.Linear:
         nn.init.xavier_uniform_(m.weight, gain=gain)
@@ -74,6 +74,13 @@ class Resnet(nn.Module):
             print('Overriding %s nc=%g with nc=%g' % (cfg, self.yaml['nc'], nc))
             self.yaml['nc'] = nc  # override yaml value
         self.model, self.save = parse_resnet_model(deepcopy(self.yaml), ch=[ch])  # model, savelist, ch_out
+        
+        conv_count = 0
+        for k, v in self.model.named_modules():
+            # print(k, type(v), type(v) is ReLUConv)
+            if 'path' not in k and type(v) is ReLUConv:
+                conv_count += 1
+        print('[MODEL INIT]', 'stem_convs:', conv_count)
 
         # Init weights, biases
         self.apply(lambda m : init_weights(m, gain=0.5, eps=1e-4, inplace=True))
