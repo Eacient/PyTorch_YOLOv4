@@ -31,8 +31,10 @@ hyp = {'optimizer': 'SGD',  # ['adam', 'SGD', None] if none, default is SGD
        'sharpness': 1,
        'degrees': 0,  # image rotation (+/- deg)
        'translate': 0,  # image translation (+/- fraction)
+       'shear': 0, # image shear (+/- deg)
        'scale': 0.2,  # image scale (+/- gain)
-       'shear': 0}  # image shear (+/- deg)
+       'mixup': False,
+       'cutmix': False,}  
 
 
 def loss_func(pred, target):
@@ -62,16 +64,15 @@ def get_optimizer(model, total_batch_size, hyp):
 
     return optimizer, accumulate, nbs
 
-def get_dataloader(train_path, test_path, batch_size, total_batch_size, opt_sz, rank=-1, tb_writer=None):
+def get_dataloader(hyp, train_path, test_path, batch_size, total_batch_size, opt_sz, rank=-1, tb_writer=None):
     # Image sizes
     gs = 32  # grid size (max stride)
     imgsz, imgsz_test = [check_img_size(x, gs) for x in opt_sz]  # verify imgsz are gs-multiples
     # Trainloader
     pre_transforms = get_preproc_transform((imgsz, imgsz), hyp['degrees'], hyp['translate'], hyp['shear'], hyp['scale'], 
                                            hyp['hsv_h'], hyp['hsv_s'], hyp['hsv_v'], hyp['contrast'], hyp['sharpness'])
-    # pre_transforms = get_test_transform()
     dataloader, labels_stat = get_mhist_loader(train_path, pre_transforms, split='train', dist=(rank != -1),
-                                  mixup=False, cutmix=False, 
+                                  mixup=hyp['mixup'], cutmix=hyp['cutmix'], 
                                   batch_size=batch_size,
                                   num_workers=min([os.cpu_count() // opt.world_size, batch_size if batch_size > 1 else 0, 8]),
                                   shuffle=True,
@@ -233,7 +234,7 @@ def train(hyp, tb_writer, opt, device):
         model = DDP(model, device_ids=[rank], output_device=rank)
 
     # dataloader and data_statistic
-    dataloader, labels_stat, testloader = get_dataloader(train_path, test_path, batch_size, total_batch_size, opt.img_size, rank, tb_writer)
+    dataloader, labels_stat, testloader = get_dataloader(hyp, train_path, test_path, batch_size, total_batch_size, opt.img_size, rank, tb_writer)
     nb = len(dataloader)  # number of batches
 
     # warmup scheduler
