@@ -245,7 +245,7 @@ def train(hyp, tb_writer, opt, device):
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
     model.gr = 1.0  # giou loss ratio (obj_loss = 1.0 or giou)
-    model.class_weights = labels_to_class_weights(labels_stat[np.newaxis, :], nc).to(device)  # attach class weights
+    model.class_weights = labels_to_class_weights(labels_stat[None], nc).to(device)  # attach class weights
     model.names = names
 
     # Start training
