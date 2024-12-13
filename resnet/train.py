@@ -59,6 +59,8 @@ def get_optimizer(model, total_batch_size, hyp):
 
     if hyp['optimizer'] == 'adam':  # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
         optimizer = optim.Adam(pg, lr=hyp['lr0'], betas=(hyp['momentum'], 0.95))  # adjust beta1 to momentum
+    elif hyp['optimizer'] == 'adamw':
+        optimizer = optim.AdamW(pg, lr=hyp['lr0'], betas=(hyp['momentum'], 0.95))
     else:
         optimizer = optim.SGD(pg, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=False)
 
@@ -240,7 +242,7 @@ def train(hyp, tb_writer, opt, device):
     nb = len(dataloader)  # number of batches
 
     # warmup scheduler
-    nw = max(3 * nb, 1e3)  # number of warmup iterations, max(3 epochs, 1k iterations)
+    nw = min(max(3 * nb, 1e3), int(0.1*(epochs-start_epoch))*nb)  # number of warmup iterations, min(max(3 epochs, 1k iterations), 0.1 total_epochs)
     warmup_scheduler = get_warmup_tuner(lf, nw, nbs, total_batch_size, hyp) if opt.warmup else None
 
     # Model parameters
@@ -321,16 +323,6 @@ def train(hyp, tb_writer, opt, device):
     # end training
 
     if rank in [-1, 0]:
-        # Strip optimizers
-        n = ('_' if len(opt.name) and not opt.name.isnumeric() else '') + opt.name
-        fresults, flast, fbest = 'results%s.txt' % n, wdir + 'last%s.pt' % n, wdir + 'best%s.pt' % n
-        for f1, f2 in zip([wdir + 'last.pt', wdir + 'best.pt', 'results.txt'], [flast, fbest, fresults]):
-            if os.path.exists(f1):
-                os.rename(f1, f2)  # rename
-                ispt = f2.endswith('.pt')  # is *.pt
-                strip_optimizer(f2) if ispt else None  # strip optimizer
-        # Finish
-        plot_results(save_dir=log_dir)  # save as results.png
         print('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))
 
     dist.destroy_process_group() if rank not in [-1, 0] else None

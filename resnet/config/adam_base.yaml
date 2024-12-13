@@ -1,0 +1,2 @@
+optimizer: adamw
+lr: 0.01
