@@ -41,10 +41,23 @@ def get_opt_param_groups_cnn(model:nn.Module, wd:float):
         else:
             other.append(v)
     print('[OPTIMIZER GROUPS]: %g .bias, %g scale.weight, %g mm.weight, %g other' % (len(bias), len(scale_weights), len(mm_weights), len(other)))
-    base_group = {'params': scale_weights + bias + other}
+    base_group = {'params': scale_weights + other}
     wd_group = {'params': mm_weights, 'weight_decay': wd}
-    return [base_group, wd_group]
-    
+    bias_group = {'params': bias}
+    return [base_group, wd_group, bias_group]
+
+def get_warmup_tuner(lf, nw, nbs, total_batch_size, hyp):
+    print('[WARMUP SCHEDULER INIT]', f'nw: {nw}, nbs: {nbs}, tbs: {total_batch_size}')
+    def warmup_scheduler(optimizer, epoch, ni):
+        xi = [0, nw]  # x interp
+        for j, x in enumerate(optimizer.param_groups):
+            # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
+            x['lr'] = np.interp(ni, xi, [0.1 if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])
+            if 'momentum' in x:
+                x['momentum'] = np.interp(ni, xi, [0.9, hyp['momentum']])
+        accumulate = max(1, np.interp(ni, xi, [1, nbs / total_batch_size]).round())
+        return accumulate
+    return warmup_scheduler
 
 class Resnet(nn.Module):
     def __init__(self, cfg='resnet50.yaml', ch=3, nc=None):  # model, input channels, number of classes
