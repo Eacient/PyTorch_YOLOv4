@@ -9,6 +9,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from torch import autocast, GradScaler
 
+import sys
+sys.path.append('.')
 import resnet.test as test  # import test.py to get mAP after each epoch
 from resnet.models.resnet import Resnet, get_opt_param_groups_cnn, get_warmup_tuner
 from resnet.utils.datasets import get_mhist_loader, get_preproc_transform, get_test_transform, plot_train_images 
@@ -327,10 +329,8 @@ def train(hyp, tb_writer, opt, device):
                 os.rename(f1, f2)  # rename
                 ispt = f2.endswith('.pt')  # is *.pt
                 strip_optimizer(f2) if ispt else None  # strip optimizer
-                os.system('gsutil cp %s gs://%s/weights' % (f2, opt.bucket)) if opt.bucket and ispt else None  # upload
         # Finish
-        if not opt.evolve:
-            plot_results(save_dir=log_dir)  # save as results.png
+        plot_results(save_dir=log_dir)  # save as results.png
         print('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))
 
     dist.destroy_process_group() if rank not in [-1, 0] else None
