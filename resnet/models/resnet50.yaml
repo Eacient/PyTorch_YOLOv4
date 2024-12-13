@@ -6,17 +6,17 @@ width_multiple: 1  # layer channel multiple
 # resnet50 backbone
 backbone:
   [[-1, 1, ReLUConv, [64, 7, 2]],  # 0
-   [-1, 1, MaxPool2d, [3, 2, 1]],  # 1-P1/2
+   [-1, 1, nn.MaxPool2d, [3, 2, 1]],  # 1-P1/2
    [-1, 3, ResBottleneckLayer, [256, 1]],
    [-1, 4, ResBottleneckLayer, [512, 2]],
    [-1, 6, ResBottleneckLayer, [1024, 2]],
    [-1, 3, ResBottleneckLayer, [2048, 2]],
-   [-1, 1, AdaptiveAvgPool2d, []],
+   [-1, 1, nn.AdaptiveAvgPool2d, []],
   ]
 
 # fc head
 # na = len(anchors[0])
 head:
   [[-1, 1, Flatten, []],
-    [-1, 1, Linear, [nc]],
+    [-1, 1, nn.Linear, [nc]],
   ]

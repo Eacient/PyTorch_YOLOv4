@@ -31,18 +31,18 @@ class ResBlock(nn.Module):
 class ResBottleneck(nn.Module):
     # Standard bottleneck
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5, s=1):  # ch_in, ch_out, shortcut, groups, expansion
-        super(Bottleneck, self).__init__()
+        super(ResBottleneck, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.conv1 = ReLUConv(c1, c_, 1, 1)
         self.conv2 = ReLUConv(c_, c_, 3, s, g=g)
         self.conv3 = ReLUConv(c_, c2, 1, 1, act=False)
         if shortcut:
-            if c1 != c2 and s == 1:
+            if c1 != c2 and s != 1:
                 self.conv_path = ReLUConv(c1, c2, k=1, s=s, act=False)
             else:
                 self.conv_path = nn.Identity()
         self.add = shortcut
-        self.act = nn.ReLU
+        self.act = nn.ReLU()
 
     def forward(self, x):
         return self.act(self.conv_path(x) + self.conv3(self.conv2(self.conv1(x))) if self.add else self.conv3(self.conv2(self.conv1(x))))
