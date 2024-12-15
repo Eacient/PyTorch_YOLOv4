@@ -20,6 +20,7 @@ from utils.utils import *
 
 mixed_precision=False
 half_test=False
+CYCLE=100
 # Hyperparameters
 hyp = {'optimizer': 'SGD',  # ['adam', 'SGD', None] if none, default is SGD
        'lr0': 0.01,  # initial learning rate (SGD=1E-2, Adam=1E-3)
@@ -214,9 +215,16 @@ def train(hyp, tb_writer, opt, device):
     # load ckpt
     start_epoch, epochs, best_fitness = load_ckpt(model, optimizer, epochs, weights, device, results_file, rank)
 
+    if epochs > CYCLE and epochs % CYCLE != 0:
+        print('[SCHEDULER CHECK]', 'epochs should either smaller than CYCLE or multiple of CYCLE')
+        return
     # create scheduler
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
-    lf = lambda x: (((1 + math.cos(x * math.pi / epochs)) / 2) ** 1.0) * 0.8 + 0.2  # cosine
+    # lf = lambda x: (((1 + math.cos(x * math.pi / epochs)) / 2) ** 1.0) * 0.8 + 0.2  # cosine
+    if epochs < 100:
+        lf = lambda x: (((1 + math.cos(x * math.pi / epochs)) / 2) ** 1.0) * 0.8 + 0.2 # cosine
+    else:
+        lf = lambda x: (((1 + math.cos(x * math.pi / ((x//CYCLE+1)*CYCLE))) / 2) ** 1.0) * 0.8 + 0.2 # cyclic cosine
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     # https://discuss.pytorch.org/t/a-problem-occured-when-resuming-an-optimizer/28822
     # plot_lr_scheduler(optimizer, scheduler, epochs)
@@ -242,7 +250,7 @@ def train(hyp, tb_writer, opt, device):
     nb = len(dataloader)  # number of batches
 
     # warmup scheduler
-    nw = min(max(3 * nb, 1e3), int(0.1*(epochs-start_epoch))*nb)  # number of warmup iterations, min(max(3 epochs, 1k iterations), 0.1 total_epochs)
+    nw = min(max(3 * nb, 1e3), int(0.1*(epochs-start_epoch))*nb, int(0.4*CYCLE)*nb)  # number of warmup iterations, min(max(3 epochs, 1k iterations), 0.1 total_epochs)
     warmup_scheduler = get_warmup_tuner(lf, nw, nbs, total_batch_size, hyp) if opt.warmup else None
 
     # Model parameters
