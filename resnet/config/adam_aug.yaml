@@ -1,4 +1,4 @@
-optimizer: SGD
+optimizer: adamw
 lr0: 0.01
 momentum: 0.937
 hsv_h: 0 # image HSV-Hue augmentation (fraction)
