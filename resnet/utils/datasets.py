@@ -8,6 +8,7 @@ import os
 import math
 import matplotlib.pyplot as plt
 import cv2
+import random
 
 MEAN = (0.7235, 0.6475, 0.7527)
 STD = (0.3160, 0.3376, 0.3030)
@@ -24,11 +25,11 @@ def get_mhist_loader(root, transform, split='train', mixup=False, cutmix=False, 
     mixup_f = v2.MixUp(num_classes=len(dataset.classes))
     cutmix_or_mixup = v2.RandomChoice([cutmix_f, mixup_f])
     if mixup and cutmix:
-        collate_fn = lambda batch : cutmix_or_mixup(*default_collate(batch))
+        collate_fn = lambda batch : cutmix_or_mixup(*default_collate(batch)) if random.random() < 0.2 else default_collate(batch)
     elif mixup:
-        collate_fn = lambda batch : mixup_f(*default_collate(batch))
+        collate_fn = lambda batch : mixup_f(*default_collate(batch)) if random.random() < 0.2 else default_collate(batch)
     elif cutmix:
-        collate_fn = lambda batch : cutmix_f(*default_collate(batch))
+        collate_fn = lambda batch : cutmix_f(*default_collate(batch)) if random.random() < 0.2 else default_collate(batch)
     else:
         collate_fn = None
     labels = np.array([_[1] for _ in dataset])
