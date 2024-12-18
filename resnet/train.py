@@ -18,7 +18,7 @@ from utils import google_utils
 from utils.datasets import *
 from utils.utils import *
 
-mixed_precision=False
+mixed_precision=True
 half_test=False
 CYCLE=100
 # Hyperparameters
@@ -105,22 +105,38 @@ def get_dataloader(hyp, train_path, test_path, batch_size, total_batch_size, opt
             tb_writer.add_histogram('classes', c, 0)
     return dataloader, labels_stat, testloader
 
-def stoastic_batch_update(model, optimizer, device, loss_func, batch, ni, accumulate, ema=None, nw=None, scalar=None):
+def stoastic_batch_update(model, optimizer, device, loss_func, batch, ni, accumulate, ema=None, nw=None, scalar:GradScaler=None):
     imgs, targets = batch
     imgs = imgs.to(device)
-    pred = model(imgs)
-    loss = loss_func(pred, targets.to(device))  # scaled by batch_size
+    if mixed_precision:
+        with autocast(device_type='cuda', dtype=torch.bfloat16):
+            pred = model(imgs)
+            loss = loss_func(pred, targets.to(device))  # scaled by batch_size
+    else:
+        pred = model(imgs)
+        loss = loss_func(pred, targets.to(device))  # scaled by batch_size
     if not torch.isfinite(loss):
         print('WARNING: non-finite loss, ending training ', loss.cpu().item())
         return -1
-    # Backward
-    loss.backward()
-    # Optimize
-    if ni % accumulate == 0:
-        optimizer.step()
-        optimizer.zero_grad()
-        if ema is not None:
-            ema.update(model)
+    if mixed_precision:
+        # backward
+        scalar.scale(loss).backward()
+        # Optimize
+        if ni % accumulate == 0:
+            scalar.step(optimizer)
+            optimizer.zero_grad()
+            scalar.update()
+            if ema is not None:
+                ema.update(model)
+    else:
+        # Backward
+        loss.backward()
+        # Optimize
+        if ni % accumulate == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            if ema is not None:
+                ema.update(model)
     return loss.cpu().item()
 
 def load_ckpt(model, optimizer, n_epochs, weights, device, results_file, rank=-1):
@@ -224,7 +240,7 @@ def train(hyp, tb_writer, opt, device):
     if epochs < 100:
         lf = lambda x: (((1 + math.cos(x * math.pi / epochs)) / 2) ** 1.0) * 0.8 + 0.2 # cosine
     else:
-        lf = lambda x: (((1 + math.cos(x * math.pi / ((x//CYCLE+1)*CYCLE))) / 2) ** 1.0) * 0.8 + 0.2 # cyclic cosine
+        lf = lambda x: (((1 + math.cos((x % 100) * math.pi / CYCLE)) / 2) ** 1.0) * 0.8 + 0.2 # cyclic cosine
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     # https://discuss.pytorch.org/t/a-problem-occured-when-resuming-an-optimizer/28822
     # plot_lr_scheduler(optimizer, scheduler, epochs)
@@ -252,6 +268,9 @@ def train(hyp, tb_writer, opt, device):
     # warmup scheduler
     nw = min(max(3 * nb, 1e3), int(0.1*(epochs-start_epoch))*nb, int(0.4*CYCLE)*nb)  # number of warmup iterations, min(max(3 epochs, 1k iterations), 0.1 total_epochs)
     warmup_scheduler = get_warmup_tuner(lf, nw, nbs, total_batch_size, hyp) if opt.warmup else None
+    
+    # grad scalar
+    grad_scalar = GradScaler() if mixed_precision else None
 
     # Model parameters
     model.nc = nc  # attach number of classes to model
@@ -282,7 +301,7 @@ def train(hyp, tb_writer, opt, device):
             # Warmup
             if warmup_scheduler and ni < nw:
                 accumulate = warmup_scheduler(optimizer, epoch, ni)
-            loss_scala = stoastic_batch_update(model, optimizer, device, loss_func, (imgs, targets), ni, accumulate, ema)
+            loss_scala = stoastic_batch_update(model, optimizer, device, loss_func, (imgs, targets), ni, accumulate, ema, scalar=grad_scalar)
             if loss_scala < 0:
                 return
             # Print
