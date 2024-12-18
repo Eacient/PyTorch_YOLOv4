@@ -1,6 +1,8 @@
 # This file contains experimental modules
 
 from models.common import *
+from models.dsc import *
+from models.ae import *
 from utils import google_utils
 
 

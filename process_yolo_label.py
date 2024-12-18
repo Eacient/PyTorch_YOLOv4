@@ -82,8 +82,8 @@ def process_coco(json_file, img_dir):
 
 def parse_neu(xml_dir, img_dir):
     xml_files = glob.glob(xml_dir+'/*.xml')
-    cate_id_map = {}
-    cate_count = 0
+    # cate_id_map = {'scratches': 0, 'inclusion': 1, 'pitted_surface': 2, 'patches': 3, 'rolled-in_scale': 4, 'crazing': 5}
+    cate_id_map = {'scratches': 0, 'inclusion': 0, 'pitted_surface': 0, 'patches': 0, 'rolled-in_scale': 0, 'crazing': 0}
     for xml_file in xml_files:
         with open(xml_file, 'r+') as f:
             xml = f.read(-1)
@@ -95,10 +95,6 @@ def parse_neu(xml_dir, img_dir):
         objs = []
         for obj in obj_list:
             cate_id = cate_id_map.get(obj['name'])
-            if cate_id is None:
-                cate_id = cate_count
-                cate_count += 1
-            cate_id_map[obj['name']] = cate_id
             # print(obj['name'], cate_id)
             xmin, ymin, xmax, ymax = int(obj['bndbox']['xmin']), int(obj['bndbox']['ymin']), int(obj['bndbox']['xmax']), int(obj['bndbox']['ymax'])
             w, h = xmax-xmin, ymax-ymin
@@ -151,14 +147,25 @@ def split_neu(img_dir):
 
 # split_neu('dataset/neu/IMAGES')
 
-LoadImagesAndLabels('dataset/neu/IMAGES/test.txt',
+
+dataset = LoadImagesAndLabels('dataset/neu/train-aug0.txt',
                     img_size=640,
                     batch_size=16,
-                    augment=False, # mosaic and other augment
-                    hyp=None, #
+                    augment=True, # mosaic and other augment
+                    hyp={'use_ae': True,
+                          'hsv_h': 0.015,  # image HSV-Hue augmentation (fraction)
+                            'hsv_s': 0.7,  # image HSV-Saturation augmentation (fraction)
+                            'hsv_v': 0.4,  # image HSV-Value augmentation (fraction)
+                            'degrees': 0.0,  # image rotation (+/- deg)
+                            'translate': 0.0,  # image translation (+/- fraction)
+                            'scale': 0.5,  # image scale (+/- gain)
+                            'shear': 0.0},  # image shear (+/- deg)},
                     rect=False,
                     image_weights=False,
                     cache_images=False,
                     single_cls=False,
                     stride=32,
                     pad=0)
+nom, img, mask, label, img_file, _ = dataset[999]
+print(nom.shape, img.shape, mask.shape, label.shape)
+print(nom[0])
