@@ -136,7 +136,9 @@ def labels_to_class_weights(labels, nc=80):
         return torch.Tensor()
 
     labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
-    classes = labels[:, 0].astype(np.int64)  # labels = [class xywh]
+    if len(labels.shape) == 1:
+        labels = labels[:, None]
+    classes = labels[:, 0].astype(np.int32)  # labels = [class xywh]
     weights = np.bincount(classes, minlength=nc)  # occurences per class
 
     # Prepend gridpoint count (for uCE trianing)
@@ -439,15 +441,17 @@ class BCEBlurWithLogitsLoss(nn.Module):
 
 def compute_loss(p, targets, model):  # predictions, targets, model
     device = targets.device
-    ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj = ft([0]).to(device), ft([0]).to(device), ft([0]).to(device) # 3 scalar tensor
+    # ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
+    device = 'cuda' if p[0].is_cuda else 'cpu'
+    lcls, lbox, lobj = torch.tensor([0], dtype=torch.float32, device=device),  torch.tensor([0], dtype=torch.float32, device=device),  torch.tensor([0], dtype=torch.float32, device=device)
+    # lcls, lbox, lobj = ft([0]).to(device), ft([0]).to(device), ft([0]).to(device)
     tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
     h = model.hyp  # hyperparameters
     red = 'mean'  # Loss reduction (sum or mean)
 
     # Define criteria
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([h['cls_pw']]), reduction=red).to(device)
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([h['obj_pw']]), reduction=red).to(device)
+    BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], dtype=torch.float32, device=device), reduction=red).to(device)
+    BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], dtype=torch.float32, device=device), reduction=red).to(device)
 
     # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
     cp, cn = smooth_BCE(eps=0.0)

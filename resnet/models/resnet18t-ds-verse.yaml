@@ -1,0 +1,22 @@
+# parameters
+nc: 80  # number of classes
+depth_multiple: 1  # model depth multiple
+width_multiple: 0.5  # layer channel multiple
+
+# resnet18 backbone
+backbone:
+  [[-1, 1, ReLUConv, [64, 7, 2]],  # 0
+   [-1, 1, nn.MaxPool2d, [3, 2]],  # 1-P1/2
+   [-1, 2, ResLayer, [64, 1, True, 2]], # stride=1, shortcut=True, ds=True
+   [-1, 2, ResLayer, [128, 2, True, 2]],
+   [-1, 2, ResLayer, [256, 2, True, 2]],
+   [-1, 2, ResLayer, [512, 2, True, 2]],
+   [-1, 1, nn.AdaptiveAvgPool2d, []],
+  ]
+
+# fc head
+# na = len(anchors[0])
+head:
+  [[-1, 1, Flatten, []],
+    [-1, 1, nn.Linear, [nc]],
+  ]

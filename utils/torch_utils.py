@@ -194,6 +194,7 @@ class ModelEMA:
     """
 
     def __init__(self, model, decay=0.9999, updates=0):
+        print('[EMA INIT]', 'decay:', decay)
         # Create EMA
         self.ema = deepcopy(model.module if is_parallel(model) else model).eval()  # FP32 EMA
         # if next(model.parameters()).device.type != 'cpu':

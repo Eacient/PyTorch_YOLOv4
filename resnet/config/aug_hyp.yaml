@@ -1,0 +1,14 @@
+optimizer: SGD
+lr0: 0.01
+momentum: 0.937
+hsv_h: 0 # image HSV-Hue augmentation (fraction)
+hsv_s: 0 # image HSV-Saturation augmentation (fraction)
+hsv_v: 0 # image HSV-Value augmentation (fraction)
+contrast: 0
+sharpness: 1
+degrees: 0 # image rotation (+/- deg)
+translate: 0 # image translation (+/- fraction)
+shear: 0 # image shear (+/- deg)
+scale: 0.2 # image scale (+/- gain)
+mixup: False
+cutmix: True
