@@ -177,7 +177,7 @@ class WindowAttention(nn.Module):
 
         # cosine attention
         attn = (F.normalize(q, dim=-1) @ F.normalize(k, dim=-1).transpose(-2, -1))
-        logit_scale = torch.clamp(self.logit_scale, max=torch.log(torch.tensor(1. / 0.01))).exp() # attn temp
+        logit_scale = torch.clamp(self.logit_scale, max=torch.log(torch.tensor(1. / 0.01)).to(self.logit_scale.device)).exp() # attn temp
         attn = attn * logit_scale
 
         relative_position_bias_table = self.cpb_mlp(self.relative_coords_table).view(-1, self.num_heads)
@@ -397,14 +397,15 @@ class PatchMerging(nn.Module):
         return flops
 
 class SwinLayer(nn.Module):
-    def __init__(self, c1, c2, n=1, num_heads=12, mlp_ratio=4., g=1, 
-                 window_spec=(14,7,0), drop_spec=(0.,0.,0.), qkv_bias=True):
+    def __init__(self, c1, c2, n=1, num_heads=12, down_sample=False, g=1,
+                 window_spec = (14, 7, 0), drop_spec=(0., 0. , 0.),
+                 mlp_ratio=4., qkv_bias=True):
         super().__init__()
-        input_resolution, window_size, pretrained_window_size =  window_spec
-        drop, attn_drop, drop_path = drop_spec
+        input_resolution, window_size, pretrained_window_size = window_spec
+        drop, attn_drop, drop_path = drop_spec 
         self.c1 = c1
         self.c2 = c2
-        self.input_resolution = input_resolution
+        self.input_resolution = to_2tuple(input_resolution)
         self.depth = n
         
         self.blocks = nn.Sequential(*[
@@ -413,12 +414,16 @@ class SwinLayer(nn.Module):
                 shift_size=0 if (i % 2 == 0) else window_size // 2,
                 pretrained_window_size=pretrained_window_size,
                 mlp_ratio=mlp_ratio, g=g,
-                qkv_bias=qkv_bias, drop=drop, attn_drop=attn_drop, drop_path=drop_path
+                qkv_bias=qkv_bias, drop=drop, attn_drop=attn_drop, 
+                drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path
             ) for i in range(n)
         ])
+        self.down_sample = PatchMerging(c2, input_resolution) if down_sample else nn.Identity()
         
     def forward(self, x):
-        return self.blocks(x)
+        x = self.blocks(x)
+        x = self.down_sample(x)
+        return x
 
     def extra_repr(self) -> str:
         return f"dim={self.c1, self.c2}, input_resolution={self.input_resolution}, depth={self.depth}"
@@ -427,7 +432,63 @@ class SwinLayer(nn.Module):
         flops = 0
         for blk in self.blocks:
             flops += blk.flops()
+        if type(self.down_sample) is not nn.Identity:
+            flops += self.down_sample.flops()
         return flops
+
+class PatchEmbed(nn.Module):
+    r""" Image to Patch Embedding
+
+    Args:
+        img_size (int): Image size.  Default: 224.
+        patch_size (int): Patch token size. Default: 4.
+        in_chans (int): Number of input image channels. Default: 3.
+        embed_dim (int): Number of linear projection output channels. Default: 96.
+        norm_layer (nn.Module, optional): Normalization layer. Default: None
+    """
+
+    def __init__(self, in_chans=3, embed_dim=96, img_size=224, patch_size=4, norm_layer=False):
+        super().__init__()
+        img_size = to_2tuple(img_size)
+        patch_size = to_2tuple(patch_size)
+        patches_resolution = [img_size[0] // patch_size[0], img_size[1] // patch_size[1]]
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.patches_resolution = patches_resolution
+        self.num_patches = patches_resolution[0] * patches_resolution[1]
+
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.norm = nn.LayerNorm(embed_dim) if norm_layer else nn.Identity()
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        # FIXME look at relaxing size constraints
+        assert H == self.img_size[0] and W == self.img_size[1], \
+            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
+        x = self.norm(x)
+        return x
+
+    def flops(self):
+        Ho, Wo = self.patches_resolution
+        flops = Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
+        if self.norm is not None:
+            flops += Ho * Wo * self.embed_dim
+        return flops
+
+class SegPool(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool1d(1)
+
+    def forward(self, x):
+        x = x.transpose(-1, -2)
+        x = self.pool(x)
+        x = x.flatten(1)
+        return x
 
 if __name__ == "__main__":
     mlp = Mlp(192, 192, 4)
