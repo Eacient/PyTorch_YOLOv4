@@ -1,10 +1,82 @@
 from copy import deepcopy
 
-# from swin.models.base import *
-from base import *
+from swin.models.base import *
+# from base import *
+from timm.layers import trunc_normal_
+
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        trunc_normal_(m.weight, std=.02)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.Conv1d): #used in shuffle_mlp
+        trunc_normal_(m.weight, std=.02)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.LayerNorm):
+        nn.init.constant_(m.bias, 0)
+        nn.init.constant_(m.weight, 1.0)
+        # m.eps = 1e-3
+
+def init_postnorm(m):
+    if isinstance(m, SwinTransformerBlock):
+        nn.init.constant_(m.norm1.bias, 0)
+        nn.init.constant_(m.norm1.weight, 0)
+        nn.init.constant_(m.norm2.bias, 0)
+        nn.init.constant_(m.norm2.weight, 0)
+
+def check_keywords_in_name(name, keywords=()):
+    isin = False
+    for keyword in keywords:
+        if keyword in name:
+            isin = True
+    return isin
+
+def get_opt_param_groups(model, skip_keywords=("cpb_mlp", "logit_scale", 'relative_position_bias_table')):
+    scale_weights = []
+    mm_weights = []
+    bias = []
+    skip = []
+    other = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad: # frozen weights
+            continue  
+        if 'bias' in name:
+            bias.append(param)
+        elif 'weight' in name  or check_keywords_in_name(name, skip_keywords):
+            if check_keywords_in_name(name, skip_keywords):
+                skip.append(param)
+                # print(name)
+            elif len(param.shape) == 1 or 'norm' in name:
+                scale_weights.append(param)
+            else:
+                mm_weights.append(param)
+        else:
+            other.append(param)
+    print('[OPTIMIZER GROUPS]: %g bias, %g skip.weight, %g scale.weight, %g mm.weight, %g other' % (len(bias), len(skip), len(scale_weights), len(mm_weights), len(other)))
+    has_decay = mm_weights + other
+    no_decay = scale_weights + skip
+    return [{'params': has_decay},
+            {'params': no_decay, 'weight_decay': 0.},
+            {'params': bias, 'weight_decay': 0.}]
+
+def get_warmup_tuner(lf, nw, nbs, total_batch_size, hyp):
+    print('[WARMUP SCHEDULER INIT]', f'nw: {nw}, nbs: {nbs}, tbs: {total_batch_size}')
+    def warmup_scheduler(optimizer, epoch, ni):
+        xi = [0, nw]  # x interp
+        for j, x in enumerate(optimizer.param_groups):
+            # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
+            x['lr'] = np.interp(ni, xi, [0.1 if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])
+            if 'momentum' in x:
+                x['momentum'] = np.interp(ni, xi, [0.9, hyp['momentum']])
+        accumulate = max(1, np.interp(ni, xi, [1, nbs / total_batch_size]).round())
+        return accumulate
+    return warmup_scheduler
+
+
 
 class Swin(nn.Module):
-    def __init__(self, cfg='swin-t.yaml', ch=3, nc=None):
+    def __init__(self, cfg='swin-t.yaml', ch=3, image_size=None, nc=None):
         super().__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -17,7 +89,13 @@ class Swin(nn.Module):
         if nc and nc != self.yaml['nc']:
             print('Overriding %s nc=%g with nc=%g' % (cfg, self.yaml['nc'], nc))
             self.yaml['nc'] = nc  # override yaml value
+        if image_size and image_size != self.yaml['image_size']:
+            print('Overriding %s input=%g with input=%g' % (cfg, self.yaml['image_size'], image_size))
+            self.yaml['image_size'] = image_size  # override yaml value
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist, ch_out
+        
+        self.apply(init_weights)
+        self.apply(init_postnorm)
         
         self.info()
         print('')
@@ -51,6 +129,7 @@ def parse_model(d, ch):
     # window spec
     image_size, patch_size = to_2tuple(d['image_size']), to_2tuple(d['patch_size'])
     window_size = d['window_size']
+    embed_dim = d['embed_dim']
 
     # drop spec
     drop, attn_drop, drop_path = d['drop'], d['attn_drop'], d['drop_path']
@@ -91,7 +170,7 @@ def parse_model(d, ch):
                     args.pop(4)
                 else:
                     pretrained_window_size = 0
-                args[2] = make_divisible(num_heads * width_multiple, 2) # verify num_heads
+                args[2] = make_divisible(num_heads * width_multiple, 2) if num_heads != 3 else 3 # verify num_heads
                 args.insert(2, n) # c1, c2, n, num_heads, down_sample
                 n = 1
                 args.insert(5, group)
@@ -133,6 +212,8 @@ if __name__ == "__main__":
     model.train()
     
     model(torch.ones(1, 3, 224, 224).to(device))
+    
+    get_opt_param_groups(model)
     # def test():
     #     a = [1, 2, 3, 4]
     #     return iter(a)

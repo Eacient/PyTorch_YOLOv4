@@ -5,25 +5,27 @@ nc: 80  # number of classes
 image_size: 224
 patch_size: 4
 window_size: 7
+embed_dim: 96
 
 # drop spec
 drop: 0.
 attn_drop: 0.
-drop_path: 0
+drop_path: 0.2
 
 # efficiency spec
-group: 1
+group: 1 # shuffle v
 depth_multiple: 1  # model depth multiple
 width_multiple: 1  # layer channel multiple
 
 # resnet50 backbone
 backbone:
   [
-    [-1, 1, PatchEmbed, [96]],  # 0
-    [-1, 2, SwinLayer, [96, 3, True, 0]],  # 1-P1/patch_size,56 [c2, num_layers, down_sample, pretrained_window_size]
-    [-1, 2, SwinLayer, [192, 6, True, 0]],  # 2-P2/2p,28
-    [-1, 6, SwinLayer, [384, 12, True, 0]],  # 3-P3/4p,14
-    [-1, 2, SwinLayer, [768, 24, False, 0]],  # 4-P4/8p,7
+    [-1, 1, PatchEmbed, [embed_dim]],  # 0
+    [-1, 1, nn.Dropout, [drop]],
+    [-1, 2, SwinLayer, [embed_dim, 3, True, 0]],  # 1-P1/patch_size,56 [c2, num_layers, down_sample, pretrained_window_size]
+    [-1, 2, SwinLayer, [2*embed_dim, 6, True, 0]],  # 2-P2/2p,28
+    [-1, 6, SwinLayer, [4*embed_dim, 12, True, 0]],  # 3-P3/4p,14
+    [-1, 2, SwinLayer, [8*embed_dim, 24, False, 0]],  # 4-P4/8p,7
     [-1, 1, nn.LayerNorm, []],  
     [-1, 1, SegPool, []],
   ]
