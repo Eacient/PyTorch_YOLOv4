@@ -1,5 +1,5 @@
 from torch.utils.data import DataLoader, default_collate
-from torchvision.datasets import ImageFolder
+from torchvision.datasets import ImageFolder, DatasetFolder
 from PIL import Image
 from torchvision.transforms import v2
 import torch
@@ -9,6 +9,28 @@ import math
 import matplotlib.pyplot as plt
 import cv2
 import random
+import tifffile as tf
+
+CRC_MEAN=(0.7268, 0.5353, 0.7092)
+CRC_STD=(0.1821, 0.2426, 0.1773)
+
+def get_crc_loader(root, class_list, transform, dist=False, **kwargs):
+    dataset = DatasetFolder(root,
+                            loader = tf.imread,
+                            is_valid_file=lambda x : 'tif' in x and (x.split('/')[-2] in class_list if class_list is not None else True),
+                            transform=transform,
+                            allow_empty=True)
+    print('[DATASET INIT]', 'dataset_size:',len(dataset))
+    print('[DATASET INIT]', 'dataset classes:', dataset.class_to_idx)
+    if class_list is not None:
+        print('[DATASET INIT]', 'using classes:', class_list)
+    # labels = np.array([_[1] for _ in dataset])
+    labels = None
+    return DataLoader(
+        dataset=dataset,
+        sampler=torch.utils.data.distributed.DistributedSampler(dataset) if dist else None,
+        **kwargs
+    ), labels
 
 MEAN = (0.7235, 0.6475, 0.7527)
 STD = (0.3160, 0.3376, 0.3030)
@@ -127,40 +149,18 @@ def plot_train_images(images, targets, fname='images.jpg', max_size=640, max_sub
     return mosaic
 
 
-def get_test_transform(input_size=(224,224), half=False, norm=True):
+def get_test_transform(input_size=(224,224), half=False, norm=True, pil=True):
     return v2.Compose([
-        v2.PILToTensor(),
+        v2.PILToTensor() if pil else v2.ToImage(),
         v2.Resize(input_size),
         v2.ToDtype(torch.float32, scale=True),
         v2.Normalize(mean=MEAN, std=STD) if norm else \
         v2.Normalize(mean=(0,0,0), std=(1,1,1)),
-        v2.ToDtype(torch.float16 if half else torch.float32, scale=False),
+        v2.ToDtype(torch.float16, scale=False) if half else v2.Identity(),
     ])
 
-def calculate_mean_std(root, transform, split='train', mixup=False, cutmix=False, epochs=5, **kwargs):
-    dataset = ImageFolder(root,
-                        transform=transform,
-                        loader=Image.open,
-                        is_valid_file=lambda x : split in x,
-                        allow_empty=False)
-    print('[DATASET INIT]', 'dataset_size:',len(dataset))
-    print('[DATASET INIT]', 'dataset classes:', dataset.class_to_idx)
-    cutmix = v2.CutMix(num_classes=len(dataset.classes))
-    mixup = v2.MixUp(num_classes=len(dataset.classes))
-    cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
-    if mixup and cutmix:
-        collate_fn = lambda batch : cutmix_or_mixup(*default_collate(batch))
-    elif mixup:
-        collate_fn = lambda batch : mixup(*default_collate(batch))
-    elif cutmix:
-        collate_fn = lambda batch : cutmix(*default_collate(batch))
-    else:
-        collate_fn = None
-    loader =  DataLoader(
-        dataset=dataset,
-        collate_fn=collate_fn,
-        **kwargs
-    )
+def calculate_mean_std(loader_func, epochs=5, **kwargs):
+    loader,_ = loader_func(**kwargs)
     avg = torch.zeros(3)
     total_bs = 0
     for i in range(epochs):
@@ -192,8 +192,22 @@ if __name__ == "__main__":
     #     print(label)
     #     break
 
-    calculate_mean_std('dataset/mhist/images', get_test_transform(norm=False), split='test', 
-                       epochs=5,
-                       mixup=True, cutmix=True, 
-                       batch_size=64, 
-                       shuffle=True)
+    # calculate_mean_std(get_mhist_loader, epochs=5, root='dataset/mhist/images',
+    #                    transform=get_test_transform(norm=False), split='test',
+    #                    mixup=True, cutmix=True, 
+    #                    batch_size=64, 
+    #                    shuffle=True)
+    
+    # dataset = ImageFolder('dataset/crc',
+    #                       loader = lambda x : tf.imread(x).transpose(2, 0, 1),
+    #                       transform=get_test_transform(input_size=(256,256), norm=False, pil=False),
+    #                       allow_empty=False)
+    
+    # print(dataset[0][0].shape)
+    
+    
+    loader,_ = get_crc_loader('dataset/crc', ['ADI', 'BACK'], get_test_transform(input_size=(256, 256), norm=False, pil=False))
+    print(next(iter(loader))[0].shape)
+    
+    # calculate_mean_std(get_crc_loader, epochs=5, root='dataset/crc', transform=get_test_transform(norm=False, pil=False), 
+    #                    batch_size=128, shuffle=True)
