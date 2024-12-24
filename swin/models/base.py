@@ -3,10 +3,12 @@ import torch.nn.functional as F
 import sys
 sys.path.append('.')
 from models.common import *
+from timm.layers import trunc_normal_
+
 
 from timm.layers import to_2tuple, DropPath
 
-def channel_shuffle(x, g):
+def channel_shuffle_conv(x, g):
     batchsize, num_channels, L = x.data.size()
     assert num_channels % g == 0
     group_channels = num_channels // g
@@ -14,6 +16,16 @@ def channel_shuffle(x, g):
     x = x.reshape(batchsize, group_channels, g, L)
     x = x.permute(0, 2, 1, 3)
     x = x.reshape(batchsize, num_channels, L)
+    return x
+
+def channel_shuffle(x, g):
+    batchsize, L, num_channels = x.data.size()
+    assert num_channels % g == 0
+    group_channels = num_channels // g
+    
+    x = x.reshape(batchsize, L, group_channels, g)
+    x = x.permute(0, 1, 3, 2)
+    x = x.reshape(batchsize, L, num_channels)
     return x
 
 class Mlp(nn.Module):
@@ -32,26 +44,48 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
+
+class GroupLinear(nn.Module):
+    def __init__(self, c1, c2, g=1):
+        super().__init__()
+        assert c1 % g == 0 and c2 % g == 0
+        self.c1=c1
+        self.c2=c2
+        self.g = g
+        self.weight = nn.Parameter(torch.zeros(g, c1//g, c2//g), requires_grad=True)
+        # self.bias = nn.Parameter(torch.zeros(g, 1, c2//g), requires_grad=True)
     
+    def forward(self, x):
+        b, N, g, c1, c2 = *x.shape[:1], self.g, self.c1, self.c2
+        return torch.bmm(x.reshape(b*N, g, c1//g).transpose(0,1), self.weight).transpose(0,1).reshape(b, N, g, c2//g)
+
 class ShuffleMlp(nn.Module):
     def __init__(self, c1, c2, e=4, g=4, drop=0.):
         super().__init__()
         c_ = int(c2 * e)
+        self.c1 = c1
+        self.c_ = c_
+        self.c2 = c2
         self.g = g
-        self.fc1 = nn.Conv1d(c1, c_, 1, 1, 0, groups=g)
+        # self.fc1 = nn.Conv1d(c1, c_, 1, 1, 0, groups=g)
+        self.weight1 = nn.Parameter(torch.zeros(g, c1//g, c_//g), requires_grad=True)
         self.act = nn.GELU()
-        self.fc2 = nn.Conv1d(c_, c2, 1, 1, 0, groups=g)
+        # self.fc2 = nn.Conv1d(c_, c2, 1, 1, 0, groups=g)
+        self.weight2 = nn.Parameter(torch.zeros(g, c_//g, c2//g), requires_grad=True)
         self.drop = nn.Dropout(drop)
+        trunc_normal_(self.weight1, std=0.2)
+        trunc_normal_(self.weight2, std=0.2)
         
     def forward(self, x):
-        x = x.transpose(-1, -2)
-        x = self.fc1(x)
+        b, N, g, c1, c_, c2 = *x.shape[:2], self.g, self.c1, self.c_, self.c2
+        x = torch.bmm(x.reshape(b*N, g, c1//g).transpose(0,1), self.weight1).transpose(0,1)
         x = self.act(x)
-        x = channel_shuffle(x, self.g)
+        x = x.transpose(1,2).reshape(b*N, g, c_//g)
         x = self.drop(x)
-        x = self.fc2(x)
+        x = torch.bmm(x.transpose(0,1), self.weight2).transpose(0,1)
         x = self.drop(x)
-        return x.transpose(-1, -2)
+        x = x.reshape(b, N, c2)
+        return x
     
 def window_partition(x, window_size):
     """
@@ -287,7 +321,7 @@ class SwinTransformerBlock(nn.Module):
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = nn.LayerNorm(c2)
-        self.mlp = ShuffleMlp(c1, c2, mlp_ratio, g, drop=drop)  if g > 1 else Mlp(c1, c2,  mlp_ratio, drop=drop)
+        self.mlp = ShuffleMlp(c1, c2, mlp_ratio, g, drop=drop) if g > 1 else Mlp(c1, c2,  mlp_ratio, drop=drop)
 
         attn_mask = calculate_sw_mask(self.shift_size, self.input_resolution, self.window_size)
         self.register_buffer("attn_mask", attn_mask)
@@ -491,10 +525,16 @@ class SegPool(nn.Module):
         return x
 
 if __name__ == "__main__":
-    mlp = Mlp(192, 192, 4)
-    smlp = ShuffleMlp(192, 192, 4, 4)
-    layer = SwinLayer(192, 192, 2, 12, 4, 4)
-    mlp(torch.ones(1, 196, 192))
-    smlp(torch.ones(1, 196, 192))
-    layer(torch.ones(1, 196, 192))
+    # mlp = Mlp(192, 192, 4)
+    # smlp = ShuffleMlp(192, 192, 4, 4)
+    # layer = SwinLayer(192, 192, 2, 12, 4, 4)
+    # mlp(torch.ones(1, 196, 192))
+    # smlp(torch.ones(1, 196, 192))
+    # layer(torch.ones(1, 196, 192))
+    c1 = 192
+    c2 = 192
+    
+    # nn.Linear()
+    # l1 = GroupLinear(c1, c2, 1)
+    # l2 = GroupLinear
 
