@@ -1,0 +1,38 @@
+# parameters
+nc: 80  # number of classes
+
+# window spec
+image_size: 224
+patch_size: 16
+window_size: 7
+embed_dim: 384
+
+# drop spec
+drop: 0.
+attn_drop: 0.
+drop_path: 0.2
+
+# efficiency spec
+group: 1 # shuffle v
+depth_multiple: 1  # model depth multiple
+width_multiple: 1  # layer channel multiple
+
+# resnet50 backbone
+backbone:
+  [
+    [-1, 1, PatchEmbed, [embed_dim]],  # 0
+    [-1, 1, nn.Dropout, [drop]],
+    [-1, 2, SwinLayer, [embed_dim, 12, False, 0]],  
+    [-1, 2, SwinLayer, [embed_dim, 12, False, 0]],  
+    [-1, 6, SwinLayer, [embed_dim, 12, True, 0]],  
+    [-1, 2, SwinLayer, [2*embed_dim, 24, False, 0]], 
+    [-1, 1, nn.LayerNorm, []],  
+    [-1, 1, SegPool, []],
+  ]
+
+# fc head
+# na = len(anchors[0])
+head:
+  [
+    [-1, 1, nn.Linear, [nc]],
+  ]
