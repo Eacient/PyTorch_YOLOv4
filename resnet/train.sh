@@ -1,5 +1,5 @@
-python resnet/train.py \
-    --cfg resnet/models/resnet18t-ds-verse.yaml \
+python swin/train.py \
+    --cfg swin/models/swin-t-gp.yaml \
     --data data/mhist.yaml \
     --epochs 500 \
     --batch-size 64 \

@@ -40,8 +40,8 @@ def get_opt_param_groups(model, skip_keywords=("cpb_mlp", "logit_scale", 'relati
     other = []
     for name, param in model.named_parameters():
         if not param.requires_grad: # frozen weights
-            continue  
-        if 'bias' in name:
+            continue
+        elif 'bias' in name:
             bias.append(param)
         elif 'weight' in name  or check_keywords_in_name(name, skip_keywords):
             if check_keywords_in_name(name, skip_keywords):
@@ -96,15 +96,27 @@ class Swin(nn.Module):
         
         self.apply(init_weights)
         self.apply(init_postnorm)
+        # self.load_patch_embed_pretrained()
         
         self.info()
         print('')
 
     def forward(self, x):
-        return self.model(x)
+        for m in self.model:
+            x = m(x)
+        return x
 
     def info(self):  # print model information
         torch_utils.model_info(self)
+        
+    def load_patch_embed_pretrained(self, pretrained='/root/codes/mae/tiny_out/checkpoint-380.pth'):
+        print('[MODEL INIT]', 'LOADING PATCHMEBED FROM', pretrained)
+        model_dict = torch.load(pretrained, map_location='cpu')['model']
+        patch_embed_dict = {k[len('patch_embed.'):]: v for k, v in model_dict.items() if 'patch_embed' in k}
+        # for k in patch_embed_dict:
+        #     print(k)
+        self.model[0].load_state_dict(patch_embed_dict)
+        self.model[0].requires_grad_(False)
 
 def get_stochastic_dpr(d, depth_multiple, drop_path_rate):
     depth_layers = []
@@ -170,7 +182,7 @@ def parse_model(d, ch):
                     args.pop(4)
                 else:
                     pretrained_window_size = 0
-                args[2] = make_divisible(num_heads * width_multiple, 2) if num_heads != 3 else 3 # verify num_heads
+                # args[2] = make_divisible(num_heads * width_multiple, 2) if num_heads != 3 else 3 # verify num_heads
                 args.insert(2, n) # c1, c2, n, num_heads, down_sample
                 n = 1
                 args.insert(5, group)
@@ -195,13 +207,13 @@ def parse_model(d, ch):
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         ch.append(c2)
-    return nn.Sequential(*layers), sorted(save)
+    return nn.ModuleList(layers), sorted(save)
     
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='swin-t.yaml', help='model.yaml')
+    parser.add_argument('--cfg', type=str, default='swin-t-ss.yaml', help='model.yaml')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     opt = parser.parse_args()
     opt.cfg = check_file(opt.cfg)  # check file

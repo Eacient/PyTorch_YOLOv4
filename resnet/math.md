@@ -80,3 +80,16 @@ $$
 ~~最小化负对数后验~~
 
 ~~$NLPT = \sum_c-log\prod_{i.label=c}p(c|x^{(i)}) = \sum_c\sum_{i.label=c}-log(\frac{p(c)act(x^{(i)}_c)}{c\_norm})$~~
+
+
+对于每个类别单独作0假设检验，误差的概率等于正态分布，输出满足假设的概率
+
+max -log(p(z)), 使得正样本z逼近于0
+
+负样本如何处理？
+
+-log(sigmoid(z_^2 - ^2))
+
+min(abs(z))
+
+output_p = 2phi(-z)
